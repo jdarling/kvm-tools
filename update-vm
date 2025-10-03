@@ -92,6 +92,9 @@ if [ -z "${new_ip}" ]; then
   exit 1
 fi
 
+today=$(date +"%Y-%m-%d")
+runasuser=$(whoami)
+
 # Disable cloud-init network configuration
 echo "network: {config: disabled}" | sudo tee /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
@@ -102,26 +105,34 @@ sudo sed -i "s/u22-base/${new_hostname}/g" /etc/hosts
 sudo hostnamectl set-hostname "${new_hostname}"
 
 # Create netplan configuration
+# Extract the gateway by taking the first 3 octets of new_ip and appending .1
+gateway_ip="$(echo "${new_ip}" | awk -F. '{print $1"."$2"."$3".1"}')"
+
+# Detect primary interface (template-friendly): use the first global IPv4 iface, fallback to eth0
+iface=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $2; exit}')
+iface=${iface:-eth0}
+
 cat << EOF | sudo tee /etc/netplan/50-cloud-init.yaml
+# Disabled on ${today} by init-vm script (${runasuser})
+#
 # This file is generated from information provided by the datasource.  Changes
 # to it will not persist across an instance reboot.  To disable cloud-init's
 # network configuration capabilities, write a file
 # /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg with the following:
 # network: {config: disabled}
 #
-# Disabled on Sept 18 2025
 network:
-    ethernets:
-        enp1s0:
-            dhcp4: no
-            addresses:
-                - ${new_ip}/24
-            routes:
-                - to: default
-                  via: 192.168.122.1
-            nameservers:
-                addresses: [8.8.8.8, 8.8.4.4]
-    version: 2
+  ethernets:
+    ${iface}:
+      dhcp4: no
+      addresses:
+        - ${new_ip}/24
+      routes:
+        - to: default
+          via: ${gateway_ip}
+      nameservers:
+        addresses: [8.8.8.8, 8.8.4.4]
+  version: 2
 EOF
 
 if ! dpkg -s openvswitch-switch >/dev/null 2>&1; then

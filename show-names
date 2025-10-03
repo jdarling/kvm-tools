@@ -12,7 +12,7 @@ function showHelp() {
   echo "Options:"
   echo "  -s, --start-ip <octet>   Set start IP (last octet)"
   echo "  -e, --end-ip <octet>     Set end IP (last octet)"
-  echo "  -b, --base-ip <base>     Set base IP (default: 192.168.122.)"
+  echo "  -b, --base-ip <base>     Set base IP (default: ${baseIP})"
   echo "  -h, --help               Show this help message"
   exit 0
 }
