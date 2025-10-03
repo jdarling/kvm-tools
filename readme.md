@@ -1,6 +1,6 @@
 # KVM Test Scripts
 
-This repository contains three bash scripts for managing virtual machines in a KVM environment:
+This repository contains four bash scripts for managing virtual machines in a KVM environment:
 
 ## Scripts Overview
 
@@ -52,7 +52,31 @@ This repository contains three bash scripts for managing virtual machines in a K
 - Connects via SSH to each IP using hardcoded user `jdarling` and key `~/.ssh/id_rsa`
 - Displays format: `<IP>: <hostname>`
 
-### 3. `update-vm` - Update VM Configuration
+### 3. `new-vm` - Clone Virtual Machine
+**Purpose**: Creates a new VM by cloning an existing VM using virt-clone.
+
+**Usage**:
+```bash
+./new-vm [options]
+```
+
+**Options**:
+- `-n, --new-vm-name NAME` - Set the new VM name (required)
+- `-e, --existing-vm-name NAME` - Set the existing VM name to clone (default: u22-server)
+- `-h, --help` - Show help message
+
+**Dependencies**: 
+- `virt-clone` command (part of libvirt tools)
+- Appropriate permissions to manage VMs via virsh
+
+**Process**:
+1. Prompts for new VM name if not provided
+2. Detects the disk path of the existing VM
+3. Shuts down the source VM if it's running
+4. Clones the VM with virt-clone, creating a new disk file
+5. The new VM is ready to be started and configured
+
+### 4. `update-vm` - Update VM Configuration
 **Purpose**: Updates the hostname and IP address configuration on the local machine (intended to run on the VM being configured).
 
 **Usage**:
@@ -79,12 +103,28 @@ This repository contains three bash scripts for managing virtual machines in a K
 **Network Configuration**:
 - Disables DHCP
 - Sets static IP with /24 subnet
-- Uses 192.168.122.1 as default gateway
+- Auto-detects gateway (first 3 octets + .1)
 - Uses Google DNS servers (8.8.8.8, 8.8.4.4)
-- Configures `enp1s0` network interface
+- Auto-detects primary network interface
 
-## Workflow Example
+## Workflow Examples
 
+### Method 1: Clone and Configure New VM
+1. **Clone a VM** using the new-vm script:
+   ```bash
+   ./new-vm --new-vm-name my-new-server
+   ```
+2. **Start the cloned VM** and get its IP:
+   ```bash
+   virsh start my-new-server
+   # Wait for it to boot, then find its IP
+   ```
+3. **Configure the VM** with new hostname and IP:
+   ```bash
+   ./init-vm --existing-ip <current-ip> --new-ip 192.168.122.105 --hostname my-new-server
+   ```
+
+### Method 2: Direct VM Configuration  
 1. **Prepare a base VM** with Ubuntu 22.04 Server and ensure SSH access
 2. **Run `init-vm`** to configure the VM with new hostname and IP:
    ```bash
@@ -112,6 +152,6 @@ This repository contains three bash scripts for managing virtual machines in a K
 ## Limitations
 
 - Hardcoded network subnet (192.168.122.x)
-- Assumes Ubuntu/Debian-based systems
+- Assumes Ubuntu/Debian-based systems  
 - `show-names` script has hardcoded username 'jdarling'
-- Network interface assumed to be 'enp1s0'
+- `new-vm` shuts down source VM during cloning process
