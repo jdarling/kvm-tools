@@ -1,0 +1,106 @@
+#!/bin/bash
+
+CLONE_VM_NAME="u22-server"
+NEW_VM_NAME=""
+
+function showHelp() {
+  echo "Usage: $0 [OPTIONS]"
+  echo ""
+  echo "Options:"
+  echo "  -n, --new-vm-name NAME        Set the new VM name"
+  echo "  -e, --existing-vm-name NAME   Set the existing VM name to clone (default: u22-server)"
+  echo "  -h, --help                    Show this help message"
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--new-vm-name)
+      NEW_VM_NAME="$2"
+      shift 2
+      ;;
+    -e|--existing-vm-name)
+      CLONE_VM_NAME="$2"
+      shift 2
+      ;;
+    -h|--help)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp
+      ;;
+  esac
+done
+
+function promptIfMissing() {
+  value=$1
+  prompt=$2
+  defaultValue=$3
+  hidden=$4
+
+  # Early return if value already provided
+  if [ -n "${value}" ]; then
+    echo "${value}"
+    return 0
+  fi
+
+  # Handle hidden input (password-style)
+  if [ "${hidden}" = true ]; then
+    read -rsp "${prompt}" tmpvar
+    echo "${tmpvar}"
+    return 0
+  fi
+
+  # Add default value to prompt if provided
+  if [ -n "${defaultValue}" ]; then
+    prompt="${prompt} (${defaultValue})"
+  fi
+
+  read -rp "${prompt}" tmpvar
+
+  # Return default if no input and default exists
+  if [[ -z "${tmpvar}" && -n "${defaultValue}" ]]; then
+    echo "${defaultValue}"
+    return 0
+  fi
+
+  echo "${tmpvar}"
+  return 0
+}
+
+NEW_VM_NAME=$(promptIfMissing "${NEW_VM_NAME}" "Enter the new VM name: ")
+if [ -z "${NEW_VM_NAME}" ]; then
+  echo "New VM name cannot be empty."
+  exit 1
+fi
+
+EXISTING_SERVER_VDA_PATH=$(sudo virsh domblklist "${CLONE_VM_NAME}" | grep -e 'vda\W' | awk '{print $2}')
+
+if [ -z "${EXISTING_SERVER_VDA_PATH}" ]; then
+  echo "Could not find the disk path for the existing VM 'u22-server'."
+  exit 1
+fi
+
+VM_VDA_PATH=$(dirname "${EXISTING_SERVER_VDA_PATH}")
+VM_VDA_EXTENSION="${EXISTING_SERVER_VDA_PATH##*.}"
+
+NEW_VM_VDA_PATH="${VM_VDA_PATH}/${NEW_VM_NAME}.${VM_VDA_EXTENSION}"
+
+# First, shut down the source VM
+VM_STATE=$(sudo virsh domstate "${CLONE_VM_NAME}")
+if [[ "${VM_STATE}" == "running" ]]; then
+  echo "Shutting down ${CLONE_VM_NAME}..."
+  sudo virsh shutdown "${CLONE_VM_NAME}"
+  # Wait for the VM to shut down
+  while [[ $(sudo virsh domstate "${CLONE_VM_NAME}") == "running" ]]; do
+    sleep 2
+  done
+  echo "${CLONE_VM_NAME} is now shut down."
+fi
+
+# Then, clone the VM
+sudo virt-clone \
+    --original ${CLONE_VM_NAME} \
+    --name ${NEW_VM_NAME} \
+    --file "${NEW_VM_VDA_PATH}"
