@@ -1,0 +1,35 @@
+# Ignore compiled binaries
+*.out
+*.o
+*.a
+*.so
+*.exe
+
+# Ignore logs and temp files
+*.log
+*.tmp
+*.swp
+*~
+
+# Ignore editor/project files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore custom secrets directory
+/.secrets
+
+# Ignore bash history and related files
+.bash_history
+.bashrc.swp
+.zsh_history
+.zshrc.swp

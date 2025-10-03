@@ -1,0 +1,141 @@
+#!/bin/bash
+
+new_hostname=""
+new_ip=""
+
+function showHelp() {
+  echo "Usage: $0 [--hostname <hostname>] [--ip <ip>] [--help]"
+  echo ""
+  echo "Options:"
+  echo "  -n, --hostname   Set the new hostname"
+  echo "  -i, --ip         Set the new IP address"
+  echo "  -h, --help       Show this help message"
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--hostname)
+      new_hostname="$2"
+      shift 2
+      ;;
+    -i|--ip)
+      new_ip="$2"
+      shift 2
+      ;;
+    -h|--help)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp
+      ;;
+  esac
+done
+
+sudo apt update
+
+# Check if ifconfig is installed, if not install net-tools
+if ! command -v ifconfig >/dev/null 2>&1; then
+  sudo apt install net-tools -y
+fi
+
+function promptIfMissing() {
+  value=$1
+  prompt=$2
+  defaultValue=$3
+  hidden=$4
+
+  # Early return if value already provided
+  if [ -n "${value}" ]; then
+    echo "${value}"
+    return 0
+  fi
+
+  # Handle hidden input (password-style)
+  if [ "${hidden}" = true ]; then
+    read -rsp "${prompt}" tmpvar
+    echo "${tmpvar}"
+    return 0
+  fi
+
+  # Add default value to prompt if provided
+  if [ -n "${defaultValue}" ]; then
+    prompt="${prompt} (${defaultValue})"
+  fi
+
+  read -rp "${prompt}" tmpvar
+
+  # Return default if no input and default exists
+  if [[ -z "${tmpvar}" && -n "${defaultValue}" ]]; then
+    echo "${defaultValue}"
+    return 0
+  fi
+
+  echo "${tmpvar}"
+  return 0
+}
+
+# Get hostname input
+new_hostname=$(promptIfMissing "${new_hostname}" "Hostname: " $(hostname))
+
+if [ -z "${new_hostname}" ]; then
+  echo "Hostname is required!"
+  exit 1
+fi
+
+# Get IP input
+new_ip=$(promptIfMissing "${new_ip}" "IP: " $(ifconfig | grep 192 | awk '{print $2}'))
+
+if [ -z "${new_ip}" ]; then
+  echo "IP is required!"
+  exit 1
+fi
+
+# Disable cloud-init network configuration
+echo "network: {config: disabled}" | sudo tee /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+
+# Update hostname in /etc/hosts
+sudo sed -i "s/u22-base/${new_hostname}/g" /etc/hosts
+
+# Set system hostname
+sudo hostnamectl set-hostname "${new_hostname}"
+
+# Create netplan configuration
+cat << EOF | sudo tee /etc/netplan/50-cloud-init.yaml
+# This file is generated from information provided by the datasource.  Changes
+# to it will not persist across an instance reboot.  To disable cloud-init's
+# network configuration capabilities, write a file
+# /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg with the following:
+# network: {config: disabled}
+#
+# Disabled on Sept 18 2025
+network:
+    ethernets:
+        enp1s0:
+            dhcp4: no
+            addresses:
+                - ${new_ip}/24
+            routes:
+                - to: default
+                  via: 192.168.122.1
+            nameservers:
+                addresses: [8.8.8.8, 8.8.4.4]
+    version: 2
+EOF
+
+if ! dpkg -s openvswitch-switch >/dev/null 2>&1; then
+  sudo apt install -y openvswitch-switch
+  echo "Done installing and configuring Open vSwitch"
+fi
+
+echo "Rebooting to apply changes..."
+
+sudo reboot now
+
+# Old way that hung SSH terminal session
+#sudo systemctl enable openvswitch-switch
+#sudo systemctl start openvswitch-switch
+
+# Apply network configuration
+#sudo netplan apply

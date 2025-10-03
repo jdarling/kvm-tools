@@ -1,0 +1,222 @@
+#!/bin/bash
+
+EXISTING_IP=""
+NEW_IP=""
+SSH_USER=""
+SSH_KEY=""
+NEW_HOSTNAME=""
+PASSWORD=""
+PASSSWORD_SET=false
+
+DEFAULT_EXISTING_IP="192.168.122.114"
+DEFAULT_IP="192.168.122.104"
+DEFAULT_USER=$(whoami)
+DEFAULT_KEY="~/.ssh/id_rsa"
+DEFAULT_HOSTNAME="u22-server-4"
+
+function showHelp() {
+  echo "Usage: $0 [options]"
+  echo ""
+  echo "Options:"
+  echo "  --new-ip, -n <ip>      Set the new VM IP address (default: ${DEFAULT_IP})"
+  echo "  --existing-ip, -e <ip> Set the existing VM IP address (default: ${DEFAULT_EXISTING_IP})"
+  echo "  --ssh-user, -u <user>  Set the SSH user (default: ${DEFAULT_USER})"
+  echo "  --ssh-key, -i <key>    Set the SSH key path (default: ${DEFAULT_KEY})"
+  echo "  --hostname, -N <name>  Set the new VM hostname (default: ${DEFAULT_HOSTNAME})"
+  echo "  --password, -p <pass>  Set the remote user password (if needed, or skip asking)"
+  echo "  --help, -h             Show this help message"
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --new-ip|-n)
+      NEW_IP="$2"
+      shift 2
+      ;;
+    --existing-ip|-e)
+      EXISTING_IP="$2"
+      shift 2
+      ;;
+    --ssh-user|-u)
+      SSH_USER="$2"
+      shift 2
+      ;;
+    --ssh-key|-i)
+      SSH_KEY="$2"
+      shift 2
+      ;;
+    --hostname|-N)
+      NEW_HOSTNAME="$2"
+      shift 2
+      ;;
+    --password|-p)
+      if [[ -z "$2" || "$2" == -* ]]; then
+        PASSSWORD_SET=true
+        shift 1
+        continue
+      fi
+      PASSWORD="$2"
+      PASSSWORD_SET=true
+      shift 2
+      ;;
+    --help|-h)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp
+      ;;
+  esac
+done
+
+function promptIfMissing() {
+  value=$1
+  prompt=$2
+  defaultValue=$3
+  hidden=$4
+
+  # Early return if value already provided
+  if [ -n "${value}" ]; then
+    echo "${value}"
+    return 0
+  fi
+
+  # Handle hidden input (password-style)
+  if [ "${hidden}" = true ]; then
+    read -rsp "${prompt}" tmpvar
+    echo "${tmpvar}"
+    return 0
+  fi
+
+  # Add default value to prompt if provided
+  if [ -n "${defaultValue}" ]; then
+    prompt="${prompt} (${defaultValue})"
+  fi
+
+  read -rp "${prompt}" tmpvar
+
+  # Return default if no input and default exists
+  if [[ -z "${tmpvar}" && -n "${defaultValue}" ]]; then
+    echo "${defaultValue}"
+    return 0
+  fi
+
+  echo "${tmpvar}"
+  return 0
+}
+
+EXISTING_IP=$(promptIfMissing "${EXISTING_IP}" "Existing VM IP: " "${DEFAULT_EXISTING_IP}")
+NEW_IP=$(promptIfMissing "${NEW_IP}" "New VM IP: " "${DEFAULT_IP}")
+SSH_USER=$(promptIfMissing "${SSH_USER}" "SSH User: " "${DEFAULT_USER}")
+SSH_KEY=$(promptIfMissing "${SSH_KEY}" "SSH Key Path: " "${DEFAULT_KEY}")
+NEW_HOSTNAME=$(promptIfMissing "${NEW_HOSTNAME}" "New VM Hostname: " "${DEFAULT_HOSTNAME}")
+PASSWORD=$(promptIfMissing "" "Remote user password (if needed): " "" true)
+
+if [ -z "${NEW_IP}" ] || [ -z "${SSH_USER}" ] || [ -z "${SSH_KEY}" ] || [ -z "${NEW_HOSTNAME}" ]; then
+  echo "All parameters are required!"
+  exit 1
+fi
+
+if ! command -v expect >/dev/null 2>&1; then
+  echo "Installing 'expect' package..."
+  sudo apt update
+  sudo apt install expect -y
+fi
+
+if ! command -v expect >/dev/null 2>&1; then
+  echo "'expect' is required but not installed. Please install it and try again."
+  exit 1
+fi
+
+echo "Waiting for remote VM (${EXISTING_IP}) to come online..."
+while ! ping -c 1 -W 1 "${EXISTING_IP}" >/dev/null 2>&1; do
+  echo "Waiting for remote VM to come online at ${EXISTING_IP}..."
+  sleep 2
+done
+echo "Remote VM is online."
+
+# Expand tilde in SSH_KEY path
+EXPANDED_SSH_KEY=$(eval echo "${SSH_KEY}")
+
+expect <<EOF
+set timeout 60
+spawn /bin/sh -c "/usr/bin/ssh-copy-id -i '${EXPANDED_SSH_KEY}' '${SSH_USER}@${EXISTING_IP}'"
+expect {
+  -re "(?i)password" {
+    send "${PASSWORD}\r"
+    exp_continue
+  }
+  eof
+}
+catch wait
+EOF
+sleep 1
+
+max_retries=5
+retry_count=0
+while true; do
+  scp -i "${EXPANDED_SSH_KEY}" ./update-vm "${SSH_USER}@${EXISTING_IP}:/home/${SSH_USER}/update-vm"
+  if [ $? -eq 0 ]; then
+    break
+  fi
+  retry_count=$((retry_count + 1))
+  if [ $retry_count -ge $max_retries ]; then
+    echo "ERROR: Failed to copy update-vm after $max_retries attempts."
+    exit 1
+  fi
+  echo "scp failed, retrying in 2 seconds... ($retry_count/$max_retries)"
+  sleep 2
+done
+sleep 1
+
+expect <<EOF
+set timeout 60
+spawn /bin/sh -c "ssh -t -i '${EXPANDED_SSH_KEY}' '${SSH_USER}@${EXISTING_IP}' \"chmod +x update-vm && ./update-vm --hostname ${NEW_HOSTNAME} --ip ${NEW_IP}\""
+expect {
+  -re "(?i)password" {
+    send "${PASSWORD}\r"
+    exp_continue
+  }
+  eof
+}
+catch wait
+EOF
+
+echo "Waiting for new VM (${NEW_IP}) to come online..."
+timeout=300
+interval=2
+elapsed=0
+while ! ping -c 1 -W 1 "${NEW_IP}" >/dev/null 2>&1; do
+  if [ $elapsed -ge $timeout ]; then
+    echo "ERROR: New VM did not come online at ${NEW_IP} within 5 minutes."
+    echo "Please use your hypervisor tool to inspect the VM's status."
+    exit 1
+  fi
+  echo "Waiting for new VM to come online at ${NEW_IP}..."
+  sleep $interval
+  elapsed=$((elapsed + interval))
+done
+echo "New VM is online at ${NEW_IP}."
+
+max_retries=150  # 5 minutes / 2 seconds
+retry_count=0
+output=""
+while [ $retry_count -lt $max_retries ]; do
+  output=$(ssh -i "${EXPANDED_SSH_KEY}" -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${SSH_USER}@${NEW_IP}" "echo -n '${NEW_IP}: ' && hostname && exit" 2>/dev/null)
+  if [ -n "$output" ]; then
+    break
+  fi
+  retry_count=$((retry_count + 1))
+  echo "Waiting for SSH to become available on ${NEW_IP}... ($retry_count/$max_retries)"
+  sleep 2
+done
+
+if [ -n "$output" ]; then
+  echo "Success! The new hostname and IP are now configured and ready for use:"
+  echo "$output"
+else
+  echo "ERROR: Unable to connect via SSH to the new VM and verify the hostname at ${NEW_IP} within 5 minutes."
+  echo "$output"
+  exit 1
+fi
