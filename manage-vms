@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# resolve script dir (handles symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SD="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+ACTION=""
+
+VM_BASE_PATTERN="u22-server-{vmNum}"
+VM_NAME_PATTERN="u22-server-{vmNum}-clone"
+VM_NUM_START=1
+VM_NUM_END=3
+
+function showHelp() {
+  echo "Usage: $0 <action> [options]"
+  echo "Actions:"
+  echo "  start                     Start VMs in the specified range"
+  echo "  stop                      Stop VMs in the specified range"
+  echo "  clone                     Clone VMs in the specified range"
+  echo "  delete                    Delete VMs in the specified range"
+  echo ""
+  echo "Options:"
+  echo "  -s, --start <number>      Set start VM number (default: ${VM_NUM_START})"
+  echo "  -e, --end <number>        Set end VM number (default: ${VM_NUM_END})"
+  echo "  -b, --base-pattern <pattern> Set base VM name pattern (default: ${VM_BASE_PATTERN})"
+  echo "  -n, --name-pattern <pattern> Set new VM name pattern (default: ${VM_NAME_PATTERN})"
+  echo "  -h, --help                Show this help message"
+  exit ${1:-0}
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    start)
+      ACTION="start"
+      shift
+      ;;
+    stop)
+      ACTION="stop"
+      shift
+      ;;
+    clone)
+      ACTION="clone"
+      shift
+      ;;
+    delete)
+      ACTION="delete"
+      shift
+      ;;
+    -s|--start)
+      VM_NUM_START="$2"
+      shift 2
+      ;;
+    -e|--end)
+      VM_NUM_END="$2"
+      shift 2
+      ;;
+    -b|--base-pattern)
+      VM_BASE_PATTERN="$2"
+      shift 2
+      ;;
+    -n|--name-pattern)
+      VM_NAME_PATTERN="$2"
+      shift 2
+      ;;
+    -h|--help)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp 1
+      ;;
+  esac
+done
+
+function vmNameFrom() {
+  local pattern=$1
+  local vmNum=$2
+  echo "${pattern//\{vmNum\}/$vmNum}"
+}
+
+function startVMs() {
+  local vmNum
+  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
+    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
+    "${SD}/start-vm" --vm-name "$VM_NAME"
+  done
+}
+
+function stopVMs() {
+  local vmNum
+  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
+    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
+    "${SD}/stop-vm" --vm-name "$VM_NAME"
+  done
+}
+
+function cloneVMs() {
+  local vmNum
+  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
+    BASE_VM_NAME=$(vmNameFrom "${VM_BASE_PATTERN}" "${vmNum}")
+    NEW_VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
+    "${SD}/clone-vm" --existing-vm-name "$BASE_VM_NAME" --new-vm-name "$NEW_VM_NAME"
+  done
+}
+
+function deleteVMs() {
+  local vmNum
+  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
+    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
+    "${SD}/delete-vm" --vm-name "$VM_NAME"
+  done
+}
+
+case "$ACTION" in
+  start)
+    startVMs
+    ;;
+  stop)
+    stopVMs
+    ;;
+  clone)
+    cloneVMs
+    ;;
+  delete)
+    deleteVMs
+    ;;
+  *)
+    echo "No valid action specified. Use 'start', 'stop', 'clone', or 'delete'."
+    showHelp 1
+    ;;
+esac

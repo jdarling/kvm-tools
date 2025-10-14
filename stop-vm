@@ -1,0 +1,79 @@
+#!/bin/bash
+
+VM_NAME=""
+
+function showHelp() {
+  # Print usage to stdout (exit 0) or stderr (non-zero) then exit with given code
+  echo <<<USAGE
+Usage: ${0} [OPTIONS]
+
+Options:
+  -n, --vm-name   Name of the virtual machine to stop
+  -h, --help      Show this help and exit
+
+Example:
+  ${0} -n my-vm
+USAGE
+  exit ${1:-0}
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--vm-name)
+      VM_NAME="$2"
+      shift 2
+      ;;
+    -h|--help)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp 1
+      ;;
+  esac
+done
+
+function promptIfMissing() {
+  value=$1
+  prompt=$2
+  defaultValue=$3
+  hidden=$4
+
+  # Early return if value already provided
+  if [ -n "${value}" ]; then
+    echo "${value}"
+    return 0
+  fi
+
+  # Handle hidden input (password-style)
+  if [ "${hidden}" = true ]; then
+    read -rsp "${prompt}" tmpvar
+    echo "${tmpvar}"
+    return 0
+  fi
+
+  # Add default value to prompt if provided
+  if [ -n "${defaultValue}" ]; then
+    prompt="${prompt} (${defaultValue})"
+  fi
+
+  read -rp "${prompt}" tmpvar
+
+  # Return default if no input and default exists
+  if [[ -z "${tmpvar}" && -n "${defaultValue}" ]]; then
+    echo "${defaultValue}"
+    return 0
+  fi
+
+  echo "${tmpvar}"
+}
+
+VM_NAME=$(promptIfMissing "${VM_NAME}" "Enter the VM name to stop: ")
+
+if [ -z "${VM_NAME}" ]; then
+  echo "VM name cannot be empty."
+  exit 1
+fi
+
+virsh shutdown "${VM_NAME}"
+exit $?

@@ -1,0 +1,93 @@
+#!/bin/bash
+
+VM_NAME=""
+
+function showHelp() {
+  echo "Usage: $0 [OPTIONS]"
+  echo ""
+  echo "Options:"
+  echo "  -n, --vm-name NAME        Name of the VM to delete"
+  echo "  -h, --help                Show this help message"
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--vm-name)
+      VM_NAME="$2"
+      shift 2
+      ;;
+    -h|--help)
+      showHelp
+      ;;
+    *)
+      echo "Unknown option: $1"
+      showHelp
+      ;;
+  esac
+done
+
+function promptIfMissing() {
+  value=$1
+  prompt=$2
+  defaultValue=$3
+  hidden=$4
+
+  # Early return if value already provided
+  if [ -n "${value}" ]; then
+    echo "${value}"
+    return 0
+  fi
+
+  # Handle hidden input (password-style)
+  if [ "${hidden}" = true ]; then
+    read -rsp "${prompt}" tmpvar
+    echo "${tmpvar}"
+    return 0
+  fi
+
+  # Add default value to prompt if provided
+  if [ -n "${defaultValue}" ]; then
+    prompt="${prompt} (${defaultValue})"
+  fi
+
+  read -rp "${prompt}" tmpvar
+
+  # Return default if no input and default exists
+  if [[ -z "${tmpvar}" && -n "${defaultValue}" ]]; then
+    echo "${defaultValue}"
+    return 0
+  fi
+
+  echo "${tmpvar}"
+  return 0
+}
+
+VM_NAME=$(promptIfMissing "${VM_NAME}" "Enter the new VM name: ")
+if [ -z "${VM_NAME}" ]; then
+  echo "VM name cannot be empty."
+  exit 1
+fi
+
+echo "Deleting VM: ${VM_NAME}"
+
+if ! sudo virsh dominfo ${VM_NAME} &> /dev/null; then
+  echo "VM ${VM_NAME} does not exist."
+  exit 1
+fi
+
+if sudo virsh domstate ${VM_NAME} | grep -q "running"; then
+  echo "Shutting down VM ${VM_NAME}..."
+  sudo virsh shutdown "${VM_NAME}"
+  # Wait for the VM to shut down
+  while sudo virsh domstate ${VM_NAME} | grep -q "running"; do
+    sleep 2
+  done
+fi
+
+sudo virsh undefine ${VM_NAME} --managed-save --snapshots-metadata --remove-all-storage
+if [ $? -ne 0 ]; then
+  echo "Failed to delete VM ${VM_NAME}."
+  exit 1
+fi
+echo "VM ${VM_NAME} deleted successfully."
