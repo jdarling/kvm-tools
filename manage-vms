@@ -11,10 +11,8 @@ SD="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
 ACTION=""
 
-VM_BASE_PATTERN="u22-server-{vmNum}"
-VM_NAME_PATTERN="u22-server-{vmNum}-clone"
-VM_NUM_START=1
-VM_NUM_END=3
+VM_BASE_PATTERN="u22-server-{1..3}"
+VM_NAME_PATTERN="u22-server-{1..3}-clone"
 
 function showHelp() {
   echo "Usage: $0 <action> [options]"
@@ -25,10 +23,22 @@ function showHelp() {
   echo "  delete                    Delete VMs in the specified range"
   echo ""
   echo "Options:"
-  echo "  -s, --start <number>      Set start VM number (default: ${VM_NUM_START})"
-  echo "  -e, --end <number>        Set end VM number (default: ${VM_NUM_END})"
   echo "  -b, --base-pattern <pattern> Set base VM name pattern (default: ${VM_BASE_PATTERN})"
   echo "  -n, --name-pattern <pattern> Set new VM name pattern (default: ${VM_NAME_PATTERN})"
+  echo ""
+  echo "Clone modes:"
+  echo "  - If the base pattern expands to a single VM, that VM will be cloned to every name produced by the name pattern."
+  echo "    Example: -b 'u22-server-1' -n 'u22-server-{2..4}-clone' will clone u22-server-1 -> u22-server-2-clone, u22-server-3-clone, u22-server-4-clone."
+  echo "  - If the base pattern expands to the same number of names as the name pattern, cloning is done pairwise by index."
+  echo "    Example: -b 'u22-server-{1..3}' -n 'u22-server-{1..3}-clone' will clone u22-server-1 -> u22-server-1-clone, etc."
+  echo "  - Any other combination is an error (the base pattern must expand to either 1 or the same count as the target names)."
+  echo ""
+  echo "Clone behavior:" 
+  echo "  - If the base pattern expands to a single VM, that VM will be cloned to every name produced by the name pattern."
+  echo "    Example: -b 'u22-server-1' -n 'u22-server-{2..4}-clone' will clone u22-server-1 -> u22-server-2-clone, u22-server-3-clone, u22-server-4-clone."
+  echo "  - If the base pattern expands to the same number of names as the name pattern, cloning is done pairwise by index."
+  echo "    Example: -b 'u22-server-{1..3}' -n 'u22-server-{1..3}-clone' will clone u22-server-1 -> u22-server-1-clone, etc."
+  echo "  - Any other combination is an error (the base pattern must expand to either 1 or the same count as the target names)."
   echo "  -h, --help                Show this help message"
   exit ${1:-0}
 }
@@ -51,14 +61,6 @@ while [[ $# -gt 0 ]]; do
       ACTION="delete"
       shift
       ;;
-    -s|--start)
-      VM_NUM_START="$2"
-      shift 2
-      ;;
-    -e|--end)
-      VM_NUM_END="$2"
-      shift 2
-      ;;
     -b|--base-pattern)
       VM_BASE_PATTERN="$2"
       shift 2
@@ -77,42 +79,78 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-function vmNameFrom() {
-  local pattern=$1
-  local vmNum=$2
-  echo "${pattern//\{vmNum\}/$vmNum}"
+function getNamesFromPattern() {
+  python3 "${SD}/parse_pattern.py" "${1}"
 }
 
 function startVMs() {
-  local vmNum
-  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
-    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
-    "${SD}/start-vm" --vm-name "$VM_NAME"
+  local names=$(getNamesFromPattern "${VM_NAME_PATTERN}")
+  for name in ${names}; do
+    name=$(echo "$name" | tr -d '\r' | xargs)  # Trim whitespace
+    "${SD}/start-vm" --vm-name "$name"
   done
 }
 
 function stopVMs() {
-  local vmNum
-  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
-    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
-    "${SD}/stop-vm" --vm-name "$VM_NAME"
+  local names=$(getNamesFromPattern "${VM_NAME_PATTERN}")
+  for name in ${names}; do
+    name=$(echo "$name" | tr -d '\r' | xargs)  # Trim whitespace
+    "${SD}/stop-vm" --vm-name "$name"
   done
 }
 
 function cloneVMs() {
-  local vmNum
-  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
-    BASE_VM_NAME=$(vmNameFrom "${VM_BASE_PATTERN}" "${vmNum}")
-    NEW_VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
-    "${SD}/clone-vm" --existing-vm-name "$BASE_VM_NAME" --new-vm-name "$NEW_VM_NAME"
+  # read patterns into arrays (one name per line) without using mapfile for portability
+  local -a cloneFromNames=()
+  local -a names=()
+
+  oldIFS=$IFS
+  IFS=$'\n'
+  set -f  # disable globbing
+  for line in $(getNamesFromPattern "${VM_BASE_PATTERN}"); do
+    # remove any CRs and trim surrounding whitespace
+    line=$(echo "$line" | tr -d '\r' | xargs)
+    cloneFromNames+=("$line")
+  done
+
+  for line in $(getNamesFromPattern "${VM_NAME_PATTERN}"); do
+    line=$(echo "$line" | tr -d '\r' | xargs)
+    names+=("$line")
+  done
+  set +f
+  IFS=$oldIFS
+
+  local numCloneFromNames=${#cloneFromNames[@]}
+  local numNames=${#names[@]}
+
+  # validate lengths: base must be either 1 (single source) or equal to number of target names
+  if [ "${numCloneFromNames}" -ne 1 ] && [ "${numCloneFromNames}" -ne "${numNames}" ]; then
+    echo "Error: base pattern must expand to either 1 or the same number of names as the target pattern." >&2
+    echo "Base count: ${numCloneFromNames}, Target count: ${numNames}" >&2
+    showHelp 2
+  fi
+
+  local base_name="${cloneFromNames[0]}"
+  local new_name=""
+  local i
+  base_name=$(echo "${base_name}" | tr -d '\r' | xargs)
+
+  for ((i=0; i<numNames; i++)); do
+    if [ "${numCloneFromNames}" -gt 1 ]; then
+      base_name="${cloneFromNames[$i]}"
+      base_name=$(echo "${base_name}" | tr -d '\r' | xargs)
+    fi
+    new_name="${names[$i]}"
+    new_name=$(echo "${new_name}" | tr -d '\r' | xargs)
+    "${SD}/clone-vm" --existing-vm-name "${base_name}" --new-vm-name "${new_name}"
   done
 }
 
 function deleteVMs() {
-  local vmNum
-  for (( vmNum=${VM_NUM_START}; vmNum<=${VM_NUM_END}; vmNum++ )); do
-    VM_NAME=$(vmNameFrom "${VM_NAME_PATTERN}" "${vmNum}")
-    "${SD}/delete-vm" --vm-name "$VM_NAME"
+  local names=$(getNamesFromPattern "${VM_NAME_PATTERN}")
+  for name in ${names}; do
+    name=$(echo "$name" | tr -d '\r' | xargs)  # Trim whitespace
+    "${SD}/delete-vm" --vm-name "$name"
   done
 }
 
