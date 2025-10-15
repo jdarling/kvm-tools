@@ -156,7 +156,7 @@ sleep 1
 max_retries=5
 retry_count=0
 while true; do
-  scp -i "${EXPANDED_SSH_KEY}" ./update-vm "${SSH_USER}@${EXISTING_IP}:/home/${SSH_USER}/update-vm"
+  scp -i "${EXPANDED_SSH_KEY}" ./util/update-vm "${SSH_USER}@${EXISTING_IP}:/home/${SSH_USER}/update-vm"
   if [ $? -eq 0 ]; then
     break
   fi

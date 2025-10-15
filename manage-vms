@@ -80,7 +80,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 function getNamesFromPattern() {
-  python3 "${SD}/parse_pattern.py" "${1}"
+  python3 "${SD}/util/parse_pattern.py" "${1}"
 }
 
 function startVMs() {
