@@ -174,14 +174,17 @@ function startVMs() {
   fi
 
   # Read names into an array safely
-  local -a names
-  names=()
-  while IFS= read -r line; do
+  local -a names=()
+  old_ifs=$IFS
+  IFS=$'\n'
+  set -f
+  for line in $(getNamesFromPattern "${VM_NAME_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    names+=("${line}")
-  done < <(getNamesFromPattern "${VM_NAME_PATTERN}")
-
+    line=$(echo "$line" | xargs)
+    names+=("$line")
+  done
+  set +f
+  IFS=$old_ifs
   for name in "${names[@]}"; do
     "${SD}/start-vm" --vm-name "${name}"
   done
@@ -193,14 +196,17 @@ function stopVMs() {
     showHelp 1
   fi
 
-  local -a names
-  names=()
-  while IFS= read -r line; do
+  local -a names=()
+  old_ifs=$IFS
+  IFS=$'\n'
+  set -f
+  for line in $(getNamesFromPattern "${VM_NAME_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    names+=("${line}")
-  done < <(getNamesFromPattern "${VM_NAME_PATTERN}")
-
+    line=$(echo "$line" | xargs)
+    names+=("$line")
+  done
+  set +f
+  IFS=$old_ifs
   for name in "${names[@]}"; do
     "${SD}/stop-vm" --vm-name "${name}"
   done
@@ -266,14 +272,17 @@ function deleteVMs() {
     showHelp 1
   fi
 
-  local -a names
-  names=()
-  while IFS= read -r line; do
+  local -a names=()
+  old_ifs=$IFS
+  IFS=$'\n'
+  set -f
+  for line in $(getNamesFromPattern "${VM_NAME_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    names+=("${line}")
-  done < <(getNamesFromPattern "${VM_NAME_PATTERN}")
-
+    line=$(echo "$line" | xargs)
+    names+=("$line")
+  done
+  set +f
+  IFS=$old_ifs
   for name in "${names[@]}"; do
     "${SD}/delete-vm" --vm-name "${name}"
   done
@@ -302,27 +311,29 @@ function initVMs() {
   fi
 
   # populate arrays safely
-  local -a names
-  local -a old_ips
-  local -a new_ips
-  names=()
-  old_ips=()
-  new_ips=()
-  while IFS= read -r line; do
+  local -a names=()
+  local -a old_ips=()
+  local -a new_ips=()
+  old_ifs=$IFS
+  IFS=$'\n'
+  set -f
+  for line in $(getNamesFromPattern "${VM_NAME_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    names+=("${line}")
-  done < <(getNamesFromPattern "${VM_NAME_PATTERN}")
-  while IFS= read -r line; do
+    line=$(echo "$line" | xargs)
+    names+=("$line")
+  done
+  for line in $(getNamesFromPattern "${VM_OLD_IP_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    old_ips+=("${line}")
-  done < <(getNamesFromPattern "${VM_OLD_IP_PATTERN}")
-  while IFS= read -r line; do
+    line=$(echo "$line" | xargs)
+    old_ips+=("$line")
+  done
+  for line in $(getNamesFromPattern "${VM_NEW_IP_PATTERN}"); do
     line=${line//$'\r'/}
-    line=$(echo "${line}" | xargs)
-    new_ips+=("${line}")
-  done < <(getNamesFromPattern "${VM_NEW_IP_PATTERN}")
+    line=$(echo "$line" | xargs)
+    new_ips+=("$line")
+  done
+  set +f
+  IFS=$old_ifs
 
   local num_names=${#names[@]}
   local num_old_ips=${#old_ips[@]}
@@ -353,6 +364,17 @@ function initVMs() {
       --ssh-key "${SSH_KEY}"
   done
 }
+
+if ! command -v expect >/dev/null 2>&1; then
+  echo "Installing 'expect' package..."
+  sudo apt update
+  sudo apt install expect -y
+fi
+
+if ! command -v expect >/dev/null 2>&1; then
+  echo "'expect' is required but not installed. Please install it and try again."
+  exit 1
+fi
 
 case "$ACTION" in
   start)
