@@ -75,5 +75,5 @@ if [ -z "${VM_NAME}" ]; then
   exit 1
 fi
 
-virsh shutdown "${VM_NAME}"
+sudo virsh shutdown "${VM_NAME}"
 exit $?
