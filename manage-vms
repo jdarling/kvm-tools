@@ -163,6 +163,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+function executeScriptWithPassword() {
+  if [ -z "${PASSWORD_FILE}" ] || [ ! -f "${PASSWORD_FILE}" ]; then
+    "$@"
+    return $?
+  fi
+  local password
+  password=$(<"${PASSWORD_FILE}")
+expect <<EOF
+set timeout 60
+spawn -noecho /bin/sh -c "$@"
+expect {
+  -re "(?i)password" {
+    send "$password\r"
+    exp_continue
+  }
+  eof
+}
+catch wait
+EOF
+  return $?
+}
+
 function getNamesFromPattern() {
   python3 "${SD}/util/parse_pattern.py" "${1}"
 }
@@ -186,7 +208,7 @@ function startVMs() {
   set +f
   IFS=$old_ifs
   for name in "${names[@]}"; do
-    "${SD}/start-vm" --vm-name "${name}"
+    executeScriptWithPassword "${SD}/start-vm" --vm-name "${name}"
   done
 }
 
@@ -208,7 +230,7 @@ function stopVMs() {
   set +f
   IFS=$old_ifs
   for name in "${names[@]}"; do
-    "${SD}/stop-vm" --vm-name "${name}"
+    executeScriptWithPassword "${SD}/stop-vm" --vm-name "${name}"
   done
 }
 
@@ -262,7 +284,7 @@ function cloneVMs() {
     fi
     new_name="${names[$i]}"
     new_name=$(echo "${new_name}" | tr -d '\r' | xargs)
-    "${SD}/clone-vm" --existing-vm-name "${base_name}" --new-vm-name "${new_name}"
+    executeScriptWithPassword "${SD}/clone-vm" --existing-vm-name "${base_name}" --new-vm-name "${new_name}"
   done
 }
 
@@ -284,7 +306,7 @@ function deleteVMs() {
   set +f
   IFS=$old_ifs
   for name in "${names[@]}"; do
-    "${SD}/delete-vm" --vm-name "${name}"
+    executeScriptWithPassword "${SD}/delete-vm" --vm-name "${name}"
   done
 }
 
