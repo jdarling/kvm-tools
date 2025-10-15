@@ -18,13 +18,17 @@ function showHelp() {
   echo "Usage: $0 [options]"
   echo ""
   echo "Options:"
-  echo "  --new-ip, -n <ip>      Set the new VM IP address (default: ${DEFAULT_IP})"
-  echo "  --existing-ip, -e <ip> Set the existing VM IP address (default: ${DEFAULT_EXISTING_IP})"
-  echo "  --ssh-user, -u <user>  Set the SSH user (default: ${DEFAULT_USER})"
-  echo "  --ssh-key, -i <key>    Set the SSH key path (default: ${DEFAULT_KEY})"
-  echo "  --hostname, -N <name>  Set the new VM hostname (default: ${DEFAULT_HOSTNAME})"
-  echo "  --password, -p <pass>  Set the remote user password (if needed, or skip asking)"
-  echo "  --help, -h             Show this help message"
+  echo "  --new-ip, -n <ip>           Set the new VM IP address (default: ${DEFAULT_IP})"
+  echo "  --existing-ip, -e <ip>      Set the existing VM IP address (default: ${DEFAULT_EXISTING_IP})"
+  echo "  --ssh-user, -u <user>       Set the SSH user (default: ${DEFAULT_USER})"
+  echo "  --ssh-key, -i <key>         Set the SSH key path (default: ${DEFAULT_KEY})"
+  echo "  --hostname, -N <name>       Set the new VM hostname (default: ${DEFAULT_HOSTNAME})"
+  echo "  --password, -p <pass>       Set the remote user password (if needed, or skip asking)"
+  echo "  --password-file, -f <file>  Set a file containing the remote user password (if needed)"
+  echo "                                (if neither --password nor --password-file is provided, you will be prompted)"
+  echo "                                (if --password is provided without a value, you will be prompted)"
+  echo ""
+  echo "  --help, -h                  Show this help message"
   exit 0
 }
 
@@ -57,6 +61,19 @@ while [[ $# -gt 0 ]]; do
         continue
       fi
       PASSWORD="$2"
+      PASSSWORD_SET=true
+      shift 2
+      ;;
+    --password-file|-f)
+      if [[ -z "$2" || "$2" == -* ]]; then
+        echo "ERROR: --password-file requires a file path argument."
+        exit 1
+      fi
+      if [[ ! -f "$2" ]]; then
+        echo "ERROR: Password file '$2' does not exist."
+        exit 1
+      fi
+      PASSWORD=$(<"$2")
       PASSSWORD_SET=true
       shift 2
       ;;
